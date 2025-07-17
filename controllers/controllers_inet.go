@@ -5,8 +5,9 @@ import (
 	"log"
 	"regexp"
 	"strconv"
+	"strings"
 
-	"golang-training/models"
+	"golang-training/database"
 	m "golang-training/models"
 
 	"github.com/go-playground/validator/v10"
@@ -98,7 +99,6 @@ func Fact(c *fiber.Ctx) error {
 }
 
 func Ascii(c *fiber.Ctx) error {
-	// รับค่า query param ชื่อ tax_id
 	input := c.Query("tax_id")
 	if input == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -106,7 +106,6 @@ func Ascii(c *fiber.Ctx) error {
 		})
 	}
 
-	// แปลงแต่ละตัวอักษรเป็น ASCII
 	asciiCodes := []int{}
 	for _, ch := range input {
 		asciiCodes = append(asciiCodes, int(ch))
@@ -119,7 +118,7 @@ func Ascii(c *fiber.Ctx) error {
 }
 
 func Register(c *fiber.Ctx) error {
-	var req models.RegisterRequest
+	var req m.RegisterRequest
 
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -127,7 +126,6 @@ func Register(c *fiber.Ctx) error {
 		})
 	}
 
-	// validate struct ด้วย validator
 	if err := validate.Struct(req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "กรอกข้อมูลผิดพลาด",
@@ -135,7 +133,6 @@ func Register(c *fiber.Ctx) error {
 		})
 	}
 
-	// รหัสผ่านไม่ตรงกัน
 	if req.Password != req.InlinePassword {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน",
@@ -147,7 +144,6 @@ func Register(c *fiber.Ctx) error {
 			"message": "ชื่อเว็บไซต์ต้องมีความยาว 2-30 ตัว ใช้ได้เฉพาะ a-z, 0-9, และ - เท่านั้น",
 		})
 	}
-	// ตรวจ username ด้วย regexp (ตัวอย่าง: ห้ามมีช่องว่าง และต้องเป็นตัวอักษร a-z, A-Z, 0-9 เท่านั้น)
 	usernameValid, _ := regexp.MatchString("^[a-zA-Z0-9]+$", req.Username)
 	if !usernameValid {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -155,9 +151,227 @@ func Register(c *fiber.Ctx) error {
 		})
 	}
 
-	// สำเร็จ
 	return c.JSON(fiber.Map{
 		"message": "ลงทะเบียนสำเร็จ",
 		"data":    req,
 	})
+}
+
+func GetDogs(c *fiber.Ctx) error {
+	db := database.DBConn
+	var dogs []m.Dogs
+
+	db.Find(&dogs) //delelete = null
+	return c.Status(200).JSON(dogs)
+}
+
+func GetDog(c *fiber.Ctx) error {
+	db := database.DBConn
+	search := strings.TrimSpace(c.Query("search"))
+	var dog []m.Dogs
+
+	result := db.Find(&dog, "dog_id = ?", search)
+
+	// returns found records count, equals `len(users)
+	if result.RowsAffected == 0 {
+		return c.SendStatus(404)
+	}
+	return c.Status(200).JSON(&dog)
+}
+
+func AddDog(c *fiber.Ctx) error {
+	//twst3
+	db := database.DBConn
+	var dog m.Dogs
+
+	if err := c.BodyParser(&dog); err != nil {
+		return c.Status(503).SendString(err.Error())
+	}
+
+	db.Create(&dog)
+	return c.Status(201).JSON(dog)
+}
+
+func UpdateDog(c *fiber.Ctx) error {
+	db := database.DBConn
+	var dog m.Dogs
+	id := c.Params("id")
+
+	if err := c.BodyParser(&dog); err != nil {
+		return c.Status(503).SendString(err.Error())
+	}
+
+	db.Where("id = ?", id).Updates(&dog)
+	return c.Status(200).JSON(dog)
+}
+
+func RemoveDog(c *fiber.Ctx) error {
+	db := database.DBConn
+	id := c.Params("id")
+	var dog m.Dogs
+
+	result := db.Delete(&dog, id)
+
+	if result.RowsAffected == 0 {
+		return c.SendStatus(404)
+	}
+
+	return c.SendStatus(200)
+}
+
+func GetDogsJson(c *fiber.Ctx) error {
+	db := database.DBConn
+	var dogs []m.Dogs
+
+	db.Find(&dogs) //10ตัว
+
+	countRed := 0
+	countGreen := 0
+	countPink := 0
+	countNoColor := 0
+	var dataResults []m.DogsRes
+	for _, v := range dogs {
+		typeStr := ""
+
+		if v.DogID >= 10 && v.DogID <= 50 {
+			typeStr = "red"
+			countRed++
+		} else if v.DogID >= 100 && v.DogID <= 150 {
+			typeStr = "green"
+			countGreen++
+		} else if v.DogID >= 200 && v.DogID <= 250 {
+			typeStr = "pink"
+			countPink++
+		} else {
+			typeStr = "no color"
+			countNoColor++
+		}
+
+		d := m.DogsRes{
+			Name:  v.Name,
+			DogID: v.DogID,
+			Type:  typeStr,
+		}
+		dataResults = append(dataResults, d)
+	}
+
+	r := m.ResultData{
+		Data:       dataResults,
+		Name:       "golang-test",
+		Count:      len(dogs), //หาผลรวม,
+		SumRed:     countRed,
+		SumGreen:   countGreen,
+		SumPink:    countPink,
+		SumNoColor: countNoColor,
+	}
+
+	return c.Status(200).JSON(r)
+}
+
+func GetDeletedDocs(c *fiber.Ctx) error {
+	db := database.DBConn
+	var dogs []m.Dogs
+
+	result := db.Unscoped().Where("deleted_at IS NOT NULL").Find(&dogs)
+
+	if result.RowsAffected == 0 {
+		return c.SendStatus(404)
+	}
+
+	return c.Status(200).JSON(dogs)
+}
+
+func GetCompanies(c *fiber.Ctx) error {
+	db := database.DBConn
+	var companies []m.Company
+
+	db.Find(&companies)
+
+	return c.Status(200).JSON(companies)
+}
+
+func GetDogsFilter50(c *fiber.Ctx) error {
+	db := database.DBConn
+	var dogs []m.Dogs
+
+	result := db.Where("dog_id > ? AND dog_id < ?", 50, 100).Find(&dogs)
+
+	if result.RowsAffected == 0 {
+		return c.SendStatus(404)
+	}
+
+	return c.Status(200).JSON(dogs)
+}
+
+func GetCompany(c *fiber.Ctx) error {
+	db := database.DBConn
+	id := c.Params("id")
+	var company m.Company
+	result := db.First(&company, id)
+	if result.RowsAffected == 0 {
+		return c.SendStatus(404)
+	}
+	return c.Status(200).JSON(company)
+}
+
+func AddCompany(c *fiber.Ctx) error {
+	db := database.DBConn
+	var company m.Company
+
+	if err := c.BodyParser(&company); err != nil {
+		return c.Status(503).SendString(err.Error())
+	}
+
+	if err := validate.Struct(company); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "กรอกข้อมูลผิดพลาด",
+			"errors":  err.Error(),
+		})
+	}
+
+	db.Create(&company)
+	return c.Status(201).JSON(company)
+}
+
+func UpdateCompany(c *fiber.Ctx) error {
+	db := database.DBConn
+	id := c.Params("id")
+
+	var existingCompany m.Company
+	if err := db.First(&existingCompany, id).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"message": "ไม่พบข้อมูลบริษัท",
+		})
+	}
+
+	var updateData m.Company
+	if err := c.BodyParser(&updateData); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "รูปแบบข้อมูลไม่ถูกต้อง",
+			"error":   err.Error(),
+		})
+	}
+
+	if err := db.Model(&existingCompany).Updates(updateData).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "อัปเดตข้อมูลไม่สำเร็จ",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(existingCompany)
+}
+
+func RemoveCompany(c *fiber.Ctx) error {
+	db := database.DBConn
+	id := c.Params("id")
+	var company m.Company
+
+	result := db.Delete(&company, id)
+
+	if result.RowsAffected == 0 {
+		return c.SendStatus(404)
+	}
+
+	return c.SendStatus(200)
 }
